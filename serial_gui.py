@@ -3,12 +3,12 @@ Project: Serial_to_CSV
 File: serial_gui.py
 Created: 22.09.2025 13:58
 """
-
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import csv
 import re
 import os
+import matplotlib.pyplot as plt
 
 
 class CSVLoggerTrainer(ctk.CTk):
@@ -38,7 +38,7 @@ class CSVLoggerTrainer(ctk.CTk):
         self.action_entry = ctk.CTkEntry(self.control_frame, textvariable=self.action_name_var, width=220)
         self.action_entry.grid(row=0, column=1, padx=(0, 8), pady=4, sticky="w")
 
-        # Toggle record button (single button)
+        # Toggle record button
         self.toggle_button = ctk.CTkButton(self.control_frame, text="Start Recording", command=self.toggle_recording, width=160)
         self.toggle_button.grid(row=0, column=2, padx=8, pady=4)
 
@@ -60,7 +60,6 @@ class CSVLoggerTrainer(ctk.CTk):
     # ---------- Recording control ----------
     def toggle_recording(self):
         if not self.recording:
-            # Start recording
             action_name = self.action_name_var.get().strip()
             if not action_name:
                 messagebox.showwarning("Missing action name", "Please enter an action name before starting recording.")
@@ -71,7 +70,6 @@ class CSVLoggerTrainer(ctk.CTk):
             self.text_box.insert("end", f"--- Started recording action '{action_name}' ---\n")
             self.text_box.see("end")
         else:
-            # Stop recording
             self.recording = False
             self.toggle_button.configure(text="Start Recording")
             action_name = self.action_name_var.get().strip()
@@ -80,10 +78,8 @@ class CSVLoggerTrainer(ctk.CTk):
                 self.text_box.see("end")
                 return
 
-            # Save into labeled_data dict under this action name
             if action_name not in self.labeled_data:
                 self.labeled_data[action_name] = []
-            # append block
             self.labeled_data[action_name].append(self.current_action_data.copy())
 
             self.text_box.insert(
@@ -91,7 +87,6 @@ class CSVLoggerTrainer(ctk.CTk):
                 f"--- Stopped recording and saved {len(self.current_action_data)} rows to action '{action_name}' ---\n"
             )
             self.text_box.see("end")
-
             self.current_action_data = []
 
     # ---------- Serial callback ----------
@@ -105,7 +100,6 @@ class CSVLoggerTrainer(ctk.CTk):
             if self.recording:
                 self.current_action_data.append(row)
             else:
-                # not recording -> treat as noise samples
                 self.noise_data.append(row)
 
         self.text_box.insert("end", line + "\n")
@@ -129,7 +123,7 @@ class CSVLoggerTrainer(ctk.CTk):
         if not folder:
             return
 
-        # Save per-action CSVs
+        # Save per-action CSVs + charts
         for label, blocks in self.labeled_data.items():
             safe = self._sanitize_filename(label)
             path = os.path.join(folder, f"{safe}.csv")
@@ -141,6 +135,8 @@ class CSVLoggerTrainer(ctk.CTk):
                         writer.writerows(block)
                         writer.writerow([])  # newline between blocks
                 self.text_box.insert("end", f"Saved {sum(len(b) for b in blocks)} rows to {path}\n")
+                # Generate chart
+                self._generate_chart(path)
             except Exception as e:
                 messagebox.showerror("Save error", f"Failed to write {path}:\n{e}")
                 return
@@ -154,6 +150,7 @@ class CSVLoggerTrainer(ctk.CTk):
                     writer.writerow(["ax", "ay", "az", "gx", "gy", "gz"])
                     writer.writerows(self.noise_data)
                 self.text_box.insert("end", f"Saved {len(self.noise_data)} noise rows to {noise_path}\n")
+                self._generate_chart(noise_path)
             except Exception as e:
                 messagebox.showerror("Save error", f"Failed to write {noise_path}:\n{e}")
                 return
@@ -161,3 +158,40 @@ class CSVLoggerTrainer(ctk.CTk):
         self.text_box.insert("end", "--- All files saved ---\n")
         self.text_box.see("end")
         messagebox.showinfo("Saved", f"CSV files written to:\n{folder}")
+
+    # ---------- Charting ----------
+    def _generate_chart(self, csv_path):
+        try:
+            time_idx = 0
+            x = []
+            y_data = [[] for _ in range(6)]
+            labels = ["ax", "ay", "az", "gx", "gy", "gz"]
+
+            with open(csv_path, "r") as f:
+                reader = csv.reader(f)
+                next(reader, None)  # skip header
+                for row in reader:
+                    if not row:  # newline = block separator
+                        time_idx += 20  # create a gap in x-axis
+                        continue
+                    values = [float(v) for v in row[:6]]
+                    x.append(time_idx)
+                    for i in range(6):
+                        y_data[i].append(values[i])
+                    time_idx += 1
+
+            plt.figure(figsize=(10, 6))
+            for i in range(6):
+                plt.plot(x, y_data[i], label=labels[i])
+            plt.title(os.path.basename(csv_path))
+            plt.xlabel("Sample")
+            plt.ylabel("Value")
+            plt.legend()
+            plt.tight_layout()
+
+            png_path = os.path.splitext(csv_path)[0] + ".png"
+            plt.savefig(png_path)
+            plt.close()
+            self.text_box.insert("end", f"Chart saved: {png_path}\n")
+        except Exception as e:
+            self.text_box.insert("end", f"Failed to generate chart for {csv_path}: {e}\n")
