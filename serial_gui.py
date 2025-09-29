@@ -94,14 +94,24 @@ class CSVLoggerTrainer(ctk.CTk):
         self.after(0, lambda: self._handle_line(line))
 
     def _handle_line(self, line):
+        """Process a new line from the serial stream"""
         values = [v.strip() for v in line.split(",")]
-        if len(values) >= 6:
-            row = values[:6]
-            if self.recording:
-                self.current_action_data.append(row)
-            else:
-                self.noise_data.append(row)
 
+        # Validate: must have 6 float values
+        if len(values) >= 6:
+            try:
+                row = [float(v) for v in values[:6]]
+                # Convert back to strings for CSV saving
+                row_str = [str(v) for v in row]
+                if self.recording:
+                    self.current_action_data.append(row_str)
+                else:
+                    self.noise_data.append(row_str)
+            except ValueError:
+                # Not valid sensor CSV (ignore)
+                pass
+
+        # Always display in GUI
         self.text_box.insert("end", line + "\n")
         self.text_box.see("end")
 
